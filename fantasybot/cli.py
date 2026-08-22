@@ -423,31 +423,29 @@ def cmd_tasks(args):
 
 
 def cmd_rivals(args):
-    """Analyze all rivals in the active league."""
+    """Analyze all rivals in the active league: estimated cash, market activity, clauses."""
     from .strategy import rivals as rivals_mod
     fc = FantasyClient()
-    lid, tid = fc.default_ids()
-    rep = rivals_mod.analyze_rivals(fc, lid, tid, initial_budget=args.initial_budget)
+    lid, _ = fc.default_ids()
+    rivals = rivals_mod.analyze_rivals(fc, lid, initial_budget=args.initial_budget)
 
     if args.json:
-        _print_json(rep)
+        _print_json(rivals)
         return
 
-    # Check if querying specific manager
+    if not rivals:
+        print("No rival data yet.")
+        return
+
+    # Check if querying a specific manager
     if args.manager:
-        query = args.manager.strip()
+        q = args.manager.strip().lower()
         matched = None
-        for r in rep["rivals"]:
-            if query.lower() in (r.get("manager_name") or "").lower():
-                matched = r
-                break
-            if query.lower() in (r.get("team_name") or "").lower():
-                matched = r
-                break
-            if query in (str(r.get("manager_id")), str(r.get("team_id")), f"#{r.get('position')}", str(r.get('position'))):
-                matched = r
-                break
-            if query.lower() in ("me", "yo") and r.get("is_me"):
+        for r in rivals:
+            if (q in (r.get("manager_name") or "").lower()
+                    or q in (str(r.get("manager_id")), str(r.get("team_id")),
+                             f"#{r.get('position')}", str(r.get("position")))
+                    or (q in ("me", "yo") and r.get("is_me"))):
                 matched = r
                 break
 
@@ -457,45 +455,66 @@ def cmd_rivals(args):
 
         r = matched
         is_me = " (YOU)" if r.get("is_me") else ""
+        tp = r.get("top_protected") or {}
         print(f"\n--- RIVAL DETAILS: {r.get('manager_name')}{is_me} ---")
-        print(f"Team: {r.get('team_name')} | Rank: #{r.get('position')} | Points: {r.get('points')}")
-        print(f"Team Value: {r.get('team_value'):,} € | Estimated Balance: ~{r.get('estimated_balance'):,} €")
-        print(f"Total Clause Value: {r.get('total_clause_value'):,} € | Top Protected: {r.get('top_protected_player') or 'None'}")
-        print(f"Purchases: {r.get('purchases'):,} € | Sales: {r.get('sales'):,} € | Net Profit: {r.get('net_profit'):+,} €\n")
+        print(f"Rank: #{r.get('position')} | Points: {r.get('points')} | Squad: {r.get('players_count')} players")
+        line = (f"Team Value: {r.get('team_value', 0):,} € | "
+                f"Estimated Cash: ~{r.get('estimated_balance', 0):,} €")
+        if r.get("known_balance") is not None:
+            line += f" | Real Cash: {r.get('known_balance'):,} €"
+        print(line)
+        top = f"{tp.get('name')} (+{tp.get('invested', 0):,} € invested)" if tp.get("name") else "None"
+        print(f"Total Clause Value: {r.get('total_clause', 0):,} € | Top Protected: {top}")
+        print(f"Purchases: {r.get('purchases', 0):,} € | Sales: {r.get('sales', 0):,} € | "
+              f"Net P&L: {r.get('net_profit', 0):+,} €\n")
 
-        print("Squad Players:")
-        print(f"{'PLAYER':<20} {'POS':<12} {'BOUGHT AT':>13} {'CURRENT VALUE':>14} {'PROFIT / LOSS':>16} {'CLAUSE':>13} {'PROTECTION':>12}")
-        print("-" * 105)
-        for p in r.get("players", []):
-            b_str = f"{p['buy_price']:,} €" if p.get("buy_price") else "(Initial)"
-            diff_str = f"{p['profit_loss']:+,} € ({p['gain_pct']:+.1f}%)" if p.get("profit_loss") is not None else "-"
-            prot_str = f"+{p['protection']:,} €" if p.get("protection", 0) > 0 else "-"
-            print(f"{p['name'][:19]:<20} {p['pos']:<12} {b_str:>13} {p['market_value']:>12,} € {diff_str:>16} {p['clause']:>11,} € {prot_str:>12}")
+        players = r.get("players") or []
+        if players:
+            print("Squad Players (by market value):")
+            print(f"{'PLAYER':<20} {'POS':<6} {'BOUGHT AT':>14} {'CUR. VALUE':>13} "
+                  f"{'PROFIT / LOSS':>18} {'CLAUSE':>13} {'PROTECT':>12}")
+            print("-" * 100)
+            for p in players:
+                b_str = f"{p['bought_price']:,} €" if p.get("bought_price") else "(Initial)"
+                diff_str = (f"{p.get('diff', 0):+,} € ({p.get('diff_pct', 0):+.1f}%)"
+                            if p.get("bought_price") else "-")
+                prot = p.get("protection", 0) or 0
+                prot_str = f"+{prot:,} €" if prot > 0 else "-"
+                print(f"{(p.get('name') or '')[:19]:<20} {p.get('pos', '?'):<6} {b_str:>14} "
+                      f"{p.get('market_value', 0):>11,} € {diff_str:>18} "
+                      f"{p.get('buyout_clause', 0):>11,} € {prot_str:>12}")
         print()
         return
 
-    print(f"\n--- LEAGUE RIVALS FINANCIAL & CLAUSE AUDIT ({rep.get('league_name', 'League')}) ---")
-    print(f"Tracked {rep.get('events_count', 0)} transfer events from {rep.get('tracked_from')} to {rep.get('tracked_to')}.\n")
-    print(f"{'#':<3} {'MANAGER':<20} {'TEAM VALUE':>13} {'EST. CASH':>13} {'PURCHASES':>13} {'SALES':>13} {'NET P&L':>14} {'TOP CLAUSE / PROTECTED':<28}")
-    print("-" * 125)
-    for r in rep["rivals"]:
+    events = rivals[0].get("tracked_events_count", 0)
+    print("\n--- LEAGUE RIVALS: FINANCIAL & CLAUSE AUDIT ---")
+    print(f"Tracked {events} transfer events from {rivals[0].get('tracked_from_date')} "
+          f"to {rivals[0].get('tracked_to_date')}.\n")
+    print(f"{'#':<3} {'MANAGER':<20} {'TEAM VALUE':>14} {'EST. CASH':>14} {'PURCHASES':>13} "
+          f"{'SALES':>13} {'NET P&L':>14} {'TOP PROTECTED':<22}")
+    print("-" * 122)
+    for r in rivals:
         is_me = " (YOU)" if r.get("is_me") else ""
-        m_name = (r.get("manager_name") or "Unknown") + is_me
-        top_prot = r.get("top_protected_player") or "-"
-        print(f"{r.get('position', 0):<3} {m_name[:19]:<20} {r.get('team_value', 0):>11,} € ~{r.get('estimated_balance', 0):>11,} € {r.get('purchases', 0):>11,} € {r.get('sales', 0):>11,} € {r.get('net_profit', 0):>+12,} € {top_prot[:27]:<28}")
+        m_name = ((r.get("manager_name") or "Unknown") + is_me)[:19]
+        top_prot = ((r.get("top_protected") or {}).get("name") or "-")[:21]
+        print(f"{r.get('position', 0):<3} {m_name:<20} {r.get('team_value', 0):>12,} € "
+              f"~{r.get('estimated_balance', 0):>12,} € {r.get('purchases', 0):>11,} € "
+              f"{r.get('sales', 0):>11,} € {r.get('net_profit', 0):>+12,} € {top_prot:<22}")
 
-    my_data = next((r for r in rep["rivals"] if r.get("is_me")), None)
-    if my_data:
-        print("\n* REALITY CHECK (Your Account):")
-        print(f"  Real Cash: {my_data.get('real_balance', 0):,} € | Pure Estimated: ~{my_data.get('estimated_balance', 0):,} € (Diff: {my_data.get('real_balance', 0) - my_data.get('estimated_balance', 0):+,} € from bonus payouts/unknown)\n")
+    mine = next((r for r in rivals if r.get("is_me")), None)
+    if mine and mine.get("known_balance") is not None:
+        diff = mine["known_balance"] - mine.get("estimated_balance", 0)
+        print(f"\n* REALITY CHECK (your account): Real {mine['known_balance']:,} € vs "
+              f"Estimated ~{mine.get('estimated_balance', 0):,} € "
+              f"(diff {diff:+,} € — daily-ad bonus / unknowns)\n")
 
 
 def cmd_history(args):
     """Analyze speculation trading and flip ROI history."""
     from .strategy import history as history_mod
     fc = FantasyClient()
-    lid, tid = fc.default_ids()
-    rep = history_mod.analyze_league_trading_history(fc, lid, my_team_id=tid)
+    lid, _ = fc.default_ids()
+    rep = history_mod.analyze_league_trading_history(fc, lid)
 
     if args.json:
         _print_json(rep)
@@ -527,8 +546,9 @@ def cmd_history(args):
         is_me = " (YOU)" if m.get("is_me") else ""
         print(f"\n--- TRADING & FLIP HISTORY: {m.get('manager_name')}{is_me} ---")
         print(f"Rank: #{m.get('position')} | Points: {m.get('points')} | Total P&L: {m.get('total_pnl'):+,} €")
-        print(f"Realized Flips Profit: {m.get('realized_profit'):+,} € ({m.get('completed_flips_count')} flips, {m.get('win_rate_pct'):.1f}% Win Rate, Avg ROI: {m.get('avg_roi_pct'):+.1f}%)")
-        print(f"Unrealized Profit in Squad: {m.get('unrealized_profit'):+,} € | Initial Squad Sales: {m.get('initial_sales_revenue'):,} €\n")
+        print(f"Realized Flips Profit: {m.get('realized_profit'):+,} € ({m.get('total_trades', 0)} flips, {m.get('win_rate_pct'):.1f}% Win Rate, Avg ROI: {m.get('avg_roi_pct'):+.1f}%)")
+        initial_rev = sum(s.get("sell_price", 0) for s in m.get("initial_sales", []))
+        print(f"Unrealized Profit in Squad: {m.get('unrealized_profit'):+,} € | Initial Squad Sales: {initial_rev:,} €\n")
 
         print("Closed Flips (Realized Profit):")
         if m.get("completed_flips"):
@@ -557,7 +577,7 @@ def cmd_history(args):
     for m in rep["managers"]:
         is_me = " (YOU)" if m.get("is_me") else ""
         m_name = (m.get("manager_name") or "Unknown") + is_me
-        print(f"{m.get('position', 0):<3} {m_name[:19]:<20} {m.get('total_pnl', 0):>+12,} € {m.get('realized_profit', 0):>+11,} € {m.get('unrealized_profit', 0):>+11,} € {m.get('completed_flips_count', 0):>7} {m.get('win_rate_pct', 0):>7.1f}% {m.get('avg_roi_pct', 0):>+8.1f}%")
+        print(f"{m.get('position', 0):<3} {m_name[:19]:<20} {m.get('total_pnl', 0):>+12,} € {m.get('realized_profit', 0):>+11,} € {m.get('unrealized_profit', 0):>+11,} € {m.get('total_trades', 0):>7} {m.get('win_rate_pct', 0):>7.1f}% {m.get('avg_roi_pct', 0):>+8.1f}%")
     print()
 
 

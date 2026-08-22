@@ -236,7 +236,15 @@ def analyze_rivals(
     activity_cumulative = state.record_activity(activity_live, league_id)
     flow_by_user = parse_activity(activity_cumulative)
 
-    initial_cash = DEFAULT_INITIAL_BUDGET if initial_budget is None else initial_budget
+    # Every manager in a league starts with the SAME budget, so instead of guessing a
+    # constant we derive it from our own known balance (teamMoney) minus our own net
+    # flow — that reverse-engineers the exact starting cash and makes every rival's
+    # estimate accurate. Falls back to the constant if our balance isn't visible.
+    if initial_budget is not None:
+        initial_cash = initial_budget
+    else:
+        initial_cash = autocalibrate_initial_cash(
+            teams, flow_by_user, fallback=DEFAULT_INITIAL_BUDGET)
 
     oldest_ts = activity_cumulative[0].get("createdAt") if activity_cumulative else None
     newest_ts = activity_cumulative[-1].get("createdAt") if activity_cumulative else None

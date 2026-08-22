@@ -102,7 +102,9 @@ class TestScoutingModule(unittest.TestCase):
                 {"playerMaster": {"id": "3", "nickname": "Bellingham", "positionId": 3, "marketValue": 45_000_000, "lastSeasonPoints": 240, "playerStatus": "injured"}},
             ]
         }
-        ts = scouting.analyze_team_squad(team_data)
+        # prob_index={} keeps the test offline; without it analyze_team_squad falls
+        # through to a live FutbolFantasy scrape (network- and cache-dependent).
+        ts = scouting.analyze_team_squad(team_data, prob_index={})
         self.assertEqual(ts["total_players"], 3)
         self.assertEqual(ts["total_last_pts"], 580)
         self.assertEqual(len(ts["stars"]), 3)

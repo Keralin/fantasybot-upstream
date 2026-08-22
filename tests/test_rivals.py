@@ -2,8 +2,12 @@
 No network calls — mock client and data.
 """
 
+import os
+import shutil
+import tempfile
 import unittest
 
+from fantasybot import state as state_mod
 from fantasybot.strategy.rivals import (
     parse_activity,
     analyze_squad_clauses,
@@ -18,6 +22,24 @@ from fantasybot.state import snapshot_rivals, diff_rival_clauses
 
 
 class TestRivalAccounting(unittest.TestCase):
+    # analyze_rivals persists to .state via record_activity; redirect those paths to a
+    # throwaway temp dir so the suite never reads or writes the real checkout state
+    # (otherwise the tests are order-dependent and can pollute production state).
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp(prefix="fbtest-rivals-")
+        self._saved = {k: getattr(state_mod, k) for k in (
+            "ACTIVITY_HISTORY_PATH", "PLAYERS_CACHE_PATH",
+            "SQUAD_HISTORY_PATH", "RIVALS_SNAPSHOT_PATH")}
+        state_mod.ACTIVITY_HISTORY_PATH = os.path.join(self._tmp, "activity_history.json")
+        state_mod.PLAYERS_CACHE_PATH = os.path.join(self._tmp, "players_cache.json")
+        state_mod.SQUAD_HISTORY_PATH = os.path.join(self._tmp, "squad_history.json")
+        state_mod.RIVALS_SNAPSHOT_PATH = os.path.join(self._tmp, "rivals_snapshot.json")
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            setattr(state_mod, k, v)
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
     def test_parse_activity_accounting(self):
         activity = [
             # User 100 buys player from market for 10M
@@ -141,6 +163,44 @@ class TestRivalAccounting(unittest.TestCase):
         self.assertEqual(r2["known_balance"], 12_345_678)
         # Pure estimated balance = 50M (initial) + 10M (sales) - 20M (purchases) = 40M
         self.assertEqual(r2["estimated_balance"], 40_000_000)
+
+    def test_analyze_rivals_autocalibrates_when_no_budget(self):
+        # With NO explicit initial_budget, the baseline must be DERIVED from my own
+        # known balance (teamMoney) — not the 100M hardcoded default. Every manager in
+        # a league starts with the same budget, so anchoring to mine is exact.
+        teams = [
+            {
+                "id": "1001", "managerId": 100, "position": 1, "teamPoints": 50,
+                "teamValue": 100_000_000, "manager": {"id": 100, "managerName": "Leader"},
+                "players": [], "teamMoney": None,  # rival -> money hidden
+            },
+            {
+                "id": "1002", "managerId": 200, "position": 2, "teamPoints": 40,
+                "teamValue": 80_000_000, "manager": {"id": 200, "managerName": "MyTeam"},
+                "players": [], "teamMoney": 12_345_678,  # authenticated user
+            },
+        ]
+        activity = [
+            {"id": "a1", "activityTypeId": TYPE_MARKET_BUY, "user1Id": 100, "amount": 25_000_000},
+            {"id": "a2", "activityTypeId": TYPE_MARKET_SELL, "user1Id": 100, "amount": 10_000_000},
+            {"id": "a3", "activityTypeId": TYPE_MATCHDAY_REWARD, "user1Id": 100, "amount": 1_000_000},
+            {"id": "a4", "activityTypeId": TYPE_MARKET_BUY, "user1Id": 200, "amount": 20_000_000},
+            {"id": "a5", "activityTypeId": TYPE_MARKET_SELL, "user1Id": 200, "amount": 10_000_000},
+        ]
+
+        class MockClient:
+            def league_teams(self, lid):
+                return teams
+            def league_activity(self, lid, fetch_all=True):
+                return activity
+
+        rivals = analyze_rivals(MockClient(), "017906461")  # no initial_budget
+        by_name = {r["manager_name"]: r for r in rivals}
+        # My initial = 12,345,678 (now) - 10M (sales) - 0 (prizes) + 20M (purchases)
+        expected_initial = 12_345_678 - 10_000_000 + 20_000_000  # 22,345,678
+        self.assertEqual(by_name["MyTeam"]["initial_cash"], expected_initial)
+        # Leader net_profit = 10M sales + 1M prizes - 25M purchases = -14M
+        self.assertEqual(by_name["Leader"]["estimated_balance"], expected_initial - 14_000_000)
 
     def test_diff_rival_clauses(self):
         prev = {
