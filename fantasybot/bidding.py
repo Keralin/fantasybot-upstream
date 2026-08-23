@@ -62,33 +62,38 @@ def last_minute_bid(league_id, market_id, max_bid, value=None, final=DEFAULT_FIN
                     poll=DEFAULT_POLL, dry_run=False, log=print):
     """Watches until close and places the bid at the optimal moment."""
     fc = FantasyClient()
+    fixed_value = value   # an explicit caller value stays fixed; otherwise re-read each poll
     el = _find(fc.market(league_id), market_id)
     if not el:
         log(f"[bid] marketId {market_id} is not in the market (already closed?).")
         return None
-    if value is None:
-        # Bid at LEAST the player's CURRENT market value. A system auction keeps its listing
-        # `salePrice` FROZEN, but a player's value is re-valued daily; once the value climbs
-        # above the frozen salePrice, LaLiga rejects any bid below the new value ("can't bid
-        # below the player's value"). So the floor is the HIGHER of the two, never the
-        # (possibly stale, lower) salePrice alone.
-        sale = el.get("salePrice") or 0
-        mval = (el.get("playerMaster") or {}).get("marketValue") or 0
-        value = max(sale, mval) or None
     close_iso = el.get("expirationDate")
     nombre = el["playerMaster"].get("nickname", market_id)
     if not close_iso:
         log(f"[bid] {nombre}: no close date; can't time it. Done.")
         return None
-    if not value:  # no usable price -> can't size a bid (and would crash the f-string below)
-        log(f"[bid] {nombre}: no market value; can't price a bid.")
-        return None
-    log(f"[bid] {nombre}: value={value:,} cap={max_bid:,} close={close_iso}")
+
+    def _current_value(row):
+        # Bid at LEAST the player's CURRENT value, RE-READ on every poll. A system auction
+        # keeps its listing `salePrice` FROZEN, but the value is re-valued (daily / during
+        # the day); if it climbs while we wait for the close, a bid sized off the value we
+        # read MINUTES AGO is below the new value and LaLiga rejects it ("... is not a valid
+        # money quantity for this player", 030.01.01). So recompute from the fresh row — the
+        # HIGHER of salePrice/marketValue — never from a stale first read.
+        if fixed_value is not None:
+            return fixed_value
+        sale = row.get("salePrice") or 0
+        mval = (row.get("playerMaster") or {}).get("marketValue") or 0
+        return max(sale, mval) or None
 
     while True:
         el = _find(fc.market(league_id), market_id)
         if not el:
             log(f"[bid] {nombre}: no longer in the market. Done.")
+            return None
+        value = _current_value(el)
+        if not value:  # no usable price -> can't size a bid (and would crash the f-string)
+            log(f"[bid] {nombre}: no market value; can't price a bid.")
             return None
         left = _seconds_left(close_iso)
         other_bids = el.get("numberOfBids", 0)
@@ -100,7 +105,7 @@ def last_minute_bid(league_id, market_id, max_bid, value=None, final=DEFAULT_FIN
                 return {"dry_run": True, "amount": amount, "other_bids": other_bids}
             resp = fc.make_bid(league_id, market_id, amount)
             log(f"[bid] {nombre}: BID {amount:,} placed "
-                f"(other_bids={other_bids}, {int(left)}s left)")
+                f"(value {value:,}, other_bids={other_bids}, {int(left)}s left)")
             events.emit("bid", f"Last-minute bid: {amount:,} for {nombre}",
                         detail={"rival_bids": other_bids, "time_left": f"{int(left)}s"})
             return resp
