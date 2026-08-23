@@ -5,8 +5,13 @@ margin. Two routes: SISTEMA (you pay ~value) and CLAUSULA (you pay the ~1.67x pr
 Returns data; the CLI does the formatting.
 """
 
+from datetime import date
+
+from .. import state
 from ..matching import match_name, POS
 from ..sources.market_trends import trends_index
+
+OFICIAL_TREND_DAYS = 7  # window for the official (LaLiga-banked) trend cross-check
 
 # Model parameters (conservative and transparent).
 DEFAULT_HORIZON = 7    # days to project
@@ -47,7 +52,7 @@ def project(trend, horizon) -> float:
     return (trend.get("valor") or 0) + rate * horizon * DAMPING
 
 
-def evaluate(element, index, horizon):
+def evaluate(element, index, horizon, today_iso=None):
     """Evaluate a market element as a flip. None if it doesn't match or is dubious."""
     pm = element["playerMaster"]
     trend = match_name(pm.get("nickname", ""), pm.get("name", ""), index)
@@ -92,7 +97,19 @@ def evaluate(element, index, horizon):
         "last_season_points": int(pm.get("lastSeasonPoints") or 0),
         "rate_dia": round(daily_rate(trend)),
         "tendencia": trend.get("tendencia"),
+        "oficial_trend_pct": _official_trend_pct(pm.get("id"), today_iso),
     }
+
+
+def _official_trend_pct(player_id, today_iso):
+    """% value change over OFICIAL_TREND_DAYS from OUR OWN banked LaLiga value history
+    (see sources.value_history) — an independent cross-check next to the futbolfantasy
+    `tendencia` above. None until enough days have been banked (agent.review() collects
+    one snapshot/day); informational only, it does not feed `margin`/`via`."""
+    if player_id is None or today_iso is None:
+        return None
+    t = state.load_value_trend(player_id, OFICIAL_TREND_DAYS, today_iso)
+    return t["pct"] if t else None
 
 
 def opportunities(client, league_id, horizon=DEFAULT_HORIZON, owned=None):
@@ -104,7 +121,8 @@ def opportunities(client, league_id, horizon=DEFAULT_HORIZON, owned=None):
     """
     index = trends_index()
     owned = owned or set()
-    ops = [evaluate(el, index, horizon) for el in client.market(league_id)]
+    today_iso = date.today().isoformat()
+    ops = [evaluate(el, index, horizon, today_iso) for el in client.market(league_id)]
     ops = [o for o in ops if o and o["player_id"] not in owned]
     ops.sort(key=lambda r: -r["margin_pct"])
     return ops

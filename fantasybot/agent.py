@@ -11,7 +11,7 @@ Returns a structured report. Firing the reminders (cronjobs) and the
 notifications are built on top (see README / next steps).
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from . import state
 from .matching import match_name, POS
@@ -21,6 +21,7 @@ from .strategy import shield as shield_mod
 from .sources.lineups import probable_lineups
 from .sources.market_trends import trends_index
 from .sources import matchday
+from .sources import value_history
 
 
 def _parse(iso):
@@ -187,6 +188,16 @@ def review(client, days_to_matchday=None):
     curr = state.snapshot(team)
     events = state.diff_snapshots(prev, curr)
     state.save_snapshot(curr)
+
+    # Bank today's OFFICIAL market values (all_players(), competition-wide — not just our
+    # squad) so we build our OWN value history over time, independent of the futbolfantasy
+    # scrape. Purely additive collection: a hiccup here must never break the review.
+    try:
+        players = client.all_players()
+        state.save_value_snapshot(date.today().isoformat(),
+                                  value_history.snapshot_from_players(players))
+    except Exception:
+        pass
 
     # 2) lineup — a squad that can't field a valid XI (e.g. no goalkeeper mid-rebuild)
     # must not crash the whole review: report it and carry on so gaps/needs still fire.

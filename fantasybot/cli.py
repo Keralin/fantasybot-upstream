@@ -13,12 +13,13 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from . import auth
 from .api import FantasyClient, FantasyError
 from .sources import lineups as ff_lineups
 from .sources.market_trends import market_trends
+from .sources import value_history
 from .strategy import flip
 from .strategy import lineup as lineup_opt
 from .strategy import needs as needs_mod
@@ -86,6 +87,21 @@ def cmd_trends(args):
     print("FALLING:")
     for p in down:
         print(f"  {p['nombre']:<24} value={p['valor']:>12,}  trend={p['tendencia']}")
+
+
+def cmd_value_snapshot(args):
+    """Print today's OFFICIAL market-value snapshot as JSON: {playerMasterId: {v, s}} from
+    LaLiga's own all_players() — the same data agent.review() banks daily under
+    .state/value_history/ so `flip` can eventually cross-check against futbolfantasy."""
+    fc = FantasyClient()
+    try:
+        players = fc.all_players()
+    except Exception as e:  # a data-source hiccup must never crash the snapshot
+        print(f"Could not fetch players: {e}")
+        return
+    snap = value_history.snapshot_from_players(players)
+    state.save_value_snapshot(date.today().isoformat(), snap)
+    print(json.dumps(snap, ensure_ascii=False))
 
 
 def cmd_onces(args):
@@ -639,6 +655,10 @@ def build_parser():
                        ("lineup", cmd_lineup), ("market", cmd_market),
                        ("trends", cmd_trends)]:
         sub.add_parser(name, help=name).set_defaults(func=func)
+
+    vs = sub.add_parser("value-snapshot",
+                        help="print today's official market-value snapshot (JSON)")
+    vs.set_defaults(func=cmd_value_snapshot)
 
     op = sub.add_parser("onces", help="a team's likely starting XI")
     op.add_argument("team", help="team slug, e.g. real-madrid")

@@ -14,6 +14,7 @@ import os
 import time
 
 from . import config
+from .sources import value_history
 
 STATE_DIR = os.path.join(config.ROOT, ".state")
 SNAPSHOT_PATH = os.path.join(STATE_DIR, "snapshot.json")
@@ -23,6 +24,7 @@ BIDS_PATH = os.path.join(STATE_DIR, "bids.json")
 BID_PLAN_PATH = os.path.join(STATE_DIR, "bid_plan.json")
 RIVALS_SNAPSHOT_PATH = os.path.join(STATE_DIR, "rivals_snapshot.json")
 ACTIVITY_HISTORY_PATH = os.path.join(STATE_DIR, "activity_history.json")
+VALUE_HISTORY_DIR = os.path.join(STATE_DIR, "value_history")
 SQUAD_HISTORY_PATH = os.path.join(STATE_DIR, "squad_history.json")
 PLAYERS_CACHE_PATH = os.path.join(STATE_DIR, "players_cache.json")
 
@@ -268,6 +270,21 @@ def load_rivals_snapshot() -> dict:
 
 def save_rivals_snapshot(snap: dict):
     _write(RIVALS_SNAPSHOT_PATH, snap)
+
+
+def save_value_snapshot(day_iso: str, snapshot: dict) -> str:
+    """Bank one day's OFFICIAL market values ({playerMasterId: {v, s}}, from
+    value_history.snapshot_from_players) under VALUE_HISTORY_DIR. Returns the path written."""
+    return value_history.save_snapshot(VALUE_HISTORY_DIR, day_iso, snapshot)
+
+
+def load_value_trend(player_id, days_back, today_iso=None):
+    """A player's official value trend vs `days_back` days ago, or None if not enough
+    history has been banked yet. `today_iso` defaults to today (Spain-agnostic UTC date —
+    a one-day skew around midnight doesn't matter for a multi-day trend)."""
+    from datetime import date
+    today_iso = today_iso or date.today().isoformat()
+    return value_history.trend(VALUE_HISTORY_DIR, player_id, today_iso, days_back)
 
 
 def diff_rival_clauses(prev: dict, curr: dict) -> list:

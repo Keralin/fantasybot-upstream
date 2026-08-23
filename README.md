@@ -31,6 +31,7 @@ python -m fantasybot team         # your squad
 python -m fantasybot market       # your league's market
 python -m fantasybot lineup       # your lineup
 python -m fantasybot trends       # who's rising/falling in value (futbolfantasy)
+python -m fantasybot value-snapshot      # bank today's OFFICIAL LaLiga market values
 python -m fantasybot onces real-madrid   # a team's likely starting XI
 python -m fantasybot flip [--horizon N]  # resale opportunities
 python -m fantasybot optimize [--apply]  # best lineup (apply with --apply)
