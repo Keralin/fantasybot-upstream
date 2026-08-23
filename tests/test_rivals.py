@@ -202,6 +202,56 @@ class TestRivalAccounting(unittest.TestCase):
         # Leader net_profit = 10M sales + 1M prizes - 25M purchases = -14M
         self.assertEqual(by_name["Leader"]["estimated_balance"], expected_initial - 14_000_000)
 
+    def test_estimated_balance_can_be_negative_not_clamped_to_zero(self):
+        # LaLiga lets a manager go negative. A heavy spender whose purchases exceed their
+        # cash must show a NEGATIVE estimate — the old max(0, ...) hid real -20M/-28M
+        # balances behind a bogus 0 (this is the ibairapado case).
+        teams = [
+            {"id": "1", "managerId": 100, "position": 1, "teamPoints": 10,
+             "teamValue": 300_000_000, "manager": {"id": 100, "managerName": "BigSpender"},
+             "players": [], "teamMoney": None},
+            {"id": "2", "managerId": 200, "position": 2, "teamPoints": 10,
+             "teamValue": 100_000_000, "manager": {"id": 200, "managerName": "Me"},
+             "players": [], "teamMoney": 5_000_000},
+        ]
+        activity = [
+            {"id": "a1", "activityTypeId": TYPE_MARKET_BUY, "user1Id": 100, "amount": 110_000_000},
+            {"id": "a2", "activityTypeId": TYPE_MARKET_SELL, "user1Id": 100, "amount": 40_000_000},
+        ]
+
+        class MockClient:
+            def league_teams(self, lid):
+                return teams
+            def league_activity(self, lid, fetch_all=True):
+                return activity
+
+        rivals = analyze_rivals(MockClient(), "NEG-LEAGUE", initial_budget=50_000_000)
+        big = next(r for r in rivals if r["manager_name"] == "BigSpender")
+        # net = 40M sales - 110M purchases = -70M ; est = 50M - 70M = -20M (floor -30M not binding)
+        self.assertEqual(big["estimated_balance"], -20_000_000)
+
+    def test_estimated_balance_floored_at_minus_10pct_squad(self):
+        # A real balance can't drop below -10% of squad value (LaLiga blocks it), so an
+        # incomplete history must not invent an impossible super-negative.
+        teams = [
+            {"id": "1", "managerId": 100, "position": 1, "teamPoints": 10,
+             "teamValue": 100_000_000, "manager": {"id": 100, "managerName": "Broke"},
+             "players": [], "teamMoney": None},
+        ]
+        activity = [
+            {"id": "a1", "activityTypeId": TYPE_MARKET_BUY, "user1Id": 100, "amount": 90_000_000},
+        ]
+
+        class MockClient:
+            def league_teams(self, lid):
+                return teams
+            def league_activity(self, lid, fetch_all=True):
+                return activity
+
+        rivals = analyze_rivals(MockClient(), "FLOOR-LEAGUE", initial_budget=50_000_000)
+        # net = -90M ; raw est = 50 - 90 = -40M ; floor = -10% * 100M = -10M -> -10M
+        self.assertEqual(rivals[0]["estimated_balance"], -10_000_000)
+
     def test_diff_rival_clauses(self):
         prev = {
             "managers": {

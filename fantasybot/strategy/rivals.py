@@ -276,7 +276,14 @@ def analyze_rivals(
         prizes = m_flow["prizes"]
         net_profit = m_flow["net_profit"]
 
-        est_balance = max(0, initial_cash + net_profit)
+        # LaLiga lets a balance go NEGATIVE — but only down to -10% of the squad's value
+        # (any bid past that is blocked). So show real negatives (a heavy spender really can
+        # sit at -28M), and only clamp to that floor so an incomplete history can't invent
+        # an impossible super-negative. The old max(0, ...) hid every negative behind a 0.
+        est_balance = initial_cash + net_profit
+        squad_value = t.get("teamValue") or 0
+        if squad_value:
+            est_balance = max(est_balance, -int(round(0.10 * squad_value)))
         known_balance = t.get("teamMoney")
 
         rivals.append({
