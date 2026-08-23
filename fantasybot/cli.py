@@ -126,8 +126,9 @@ def cmd_optimize(args):
     fc = FantasyClient()
     lid, tid = fc.default_ids()
     team = fc.team(lid, tid)
+    premium = agent_mod.league_allows_premium_formations(fc, lid)
     try:
-        best = lineup_opt.optimize(team)
+        best = lineup_opt.optimize(team, premium=premium)
     except ValueError as e:
         # Incomplete squad (no goalkeeper / fewer than 11): can't field a valid XI.
         print(f"Can't build a lineup: {e}")
@@ -151,9 +152,9 @@ def cmd_optimize(args):
     print(f"\nSubstitutes (outside the XI): {banked}")
 
     if args.apply:
-        fc.update_lineup(tid, best["payload"])
-        events.emit("lineup", f"Lineup {d}-{m}-{f} applied",
-                    detail={"score": best.get("total")})
+        current_ids, cur_coach, cur_captain = agent_mod._current_lineup(fc, tid)
+        execute_mod.apply_lineup(fc, tid, best, current_ids, dry_run=False,
+                                 current_coach=cur_coach, current_captain=cur_captain)
         print("\n[OK] Lineup applied.")
     else:
         print("\n(Proposal only. Add --apply to save it to your team.)")
@@ -268,17 +269,19 @@ def cmd_agent(args):
     # --- autonomous execution (line up + bid; buyout clauses NOT) ---
     lid, tid = fc.default_ids()
     team = fc.team(lid, tid)
+    premium = agent_mod.league_allows_premium_formations(fc, lid)
     try:
-        best = lineup_opt.optimize(team)
+        best = lineup_opt.optimize(team, premium=premium)
     except ValueError as e:
         # Incomplete squad (e.g. no goalkeeper): can't field a valid XI, so there's
         # nothing safe to auto-apply. Surface it and skip acting, don't crash the run.
         print(f"\n--- AUTONOMOUS ACTIONS [skipped] ---")
         print(f"· Can't act: incomplete squad ({e}). Sign the missing position first.")
         return
-    current = agent_mod._current_xi_ids(fc, tid)
+    current, cur_coach, cur_captain = agent_mod._current_lineup(fc, tid)
     result = execute_mod.act(fc, lid, tid, team, best, current,
-                             dry_run=not args.execute)
+                             dry_run=not args.execute,
+                             current_coach=cur_coach, current_captain=cur_captain)
     verbo = "EXECUTED" if args.execute else "PLAN (use --execute to act)"
     print(f"\n--- AUTONOMOUS ACTIONS [{verbo}] ---")
     lu = result["lineup"]

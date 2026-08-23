@@ -182,6 +182,27 @@ class FantasyClient:
             f"/league/{league_id}/buyout/{player_id}/increase?x-lang=es"),
             {"buyoutClause": amount})
 
+    # --- shield (blindaje): protect a player from a rival's buyout clause ---
+    def check_shield(self, league_id, player_team_id):
+        """Whether one of your players is shielded (blindado). Returns null when he is NOT
+        shielded, else the shield info. Keyed on the playerTeamId (your roster-slot id)."""
+        return self.get(self._cmp(
+            f"/league/{league_id}/player-team/{player_team_id}/check-shield?x-lang=es"))
+
+    def shield_player(self, league_id, player_team_id):
+        """Shield (blindar) one of your players so a rival can't buy him via his buyout
+        clause. FREE — done through a rewarded-ad flow.
+
+        NOTE: like sell_player, LaLiga keys this on the playerTeamId (your roster-slot id),
+        NOT the playerMaster id — and the request FIELD is still named `playerId` while its
+        VALUE is the playerTeamId (field-name-vs-value mismatch). The exact acceptance —
+        whether this PUT succeeds without a real rewarded ad actually being watched — is
+        TO-BE-LIVE-CONFIRMED before deploy.
+        """
+        return self.put(self._cmp(f"/league/{league_id}/shield/player?x-lang=es"),
+                        {"playerId": player_team_id, "rewardedAdType": "Blindaje",
+                         "rewardedAd": 1})
+
     # --- writes: lineup ---
     def update_lineup(self, team_id, lineup_data):
         return self.put(self._cmp(f"/teams/{team_id}/lineup?x-lang=es"), lineup_data)

@@ -123,6 +123,86 @@ class TestLineupNeverEmptyNeverUnavailable(unittest.TestCase):
         self.assertNotIn("s_inj", strikers,
                          "an injured player must not be fielded when a doubtful one is free")
 
+    def test_midfield_shortage_leaves_honest_hole_and_flags_incomplete(self):
+        """Squad with only 2 midfielders — FEWER than any legal formation needs (min 3).
+
+        LaLiga has NO formation with fewer than 3 midfielders (the 7 legal shapes all
+        need >=3), so a 2-midfielder squad CANNOT field a complete XI. The optimizer must
+        NOT paper over it by borrowing a non-midfielder into the empty slot — LaLiga
+        silently drops any out-of-position player, so that 'patch' does nothing but lie
+        about the lineup. Instead the optimizer must:
+          - field ONLY the real midfielders it has (the midfield line stays SHORT),
+          - pick the shape with the FEWEST empty holes (a 3-midfield formation: 1 hole),
+          - flag the XI as incomplete and say which line is short, so the copy can raise
+            it as an URGENT problem (sign a midfielder) instead of 'lineup applied'.
+        This is the exact case a real user hit: a 3-5-2 (3 empty central slots) applied
+        to a 2-midfielder squad.
+        """
+        players = [_player("gk1", 1, 5_000_000)]
+        players += [_player(f"d{i}", 2, 8_000_000) for i in range(1, 6)]   # 5 DEF
+        players += [_player("m1", 3, 6_000_000), _player("m2", 3, 6_000_000)]  # only 2 MED
+        players += [_player(f"s{i}", 4, 15_000_000) for i in range(1, 6)]   # 5 DEL
+        best = optimize({"players": players}, prob_index={})
+
+        p = best["payload"]
+        # NO out-of-position player is smuggled into midfield — only the 2 real ones
+        self.assertEqual(set(p["midfield"]), {"m1", "m2"},
+                         f"midfield must hold ONLY the real midfielders, got {p['midfield']}")
+        # fewest holes: a 3-midfielder formation, leaving exactly 1 empty central slot
+        self.assertEqual(best["formation"][1], 3,
+                         f"expected a 3-midfielder formation (fewest holes), got {best['formation']}")
+        # the XI is flagged incomplete, naming the short line so the copy can act on it
+        self.assertTrue(best.get("incomplete"),
+                        "a squad that can't fill a line must be flagged incomplete")
+        self.assertEqual(best.get("missing", {}).get("midfield"), 1,
+                         f"must report 1 missing midfielder, got {best.get('missing')}")
+        # def/str lines ARE complete and position-valid (only midfield is short)
+        self.assertEqual(len(p["defender"]), best["formation"][0])
+        self.assertEqual(len(p["striker"]), best["formation"][2])
+
+    def test_premium_league_completes_two_midfielder_squad_with_523(self):
+        """In a PREMIUM league (config.premiumFeatures.formations = true) LaLiga unlocks the
+        2-midfielder shapes (4-2-4, 5-2-3, 3-2-5). A squad with 2 MED / 5 DEF / 3 DEL can then
+        field a COMPLETE 11 as a 5-2-3 — no holes — instead of leaving a midfield slot empty.
+        Verified live against the API: LaLiga saved exactly this 5-2-3.
+        """
+        players = [_player("gk1", 1, 5_000_000)]
+        players += [_player(f"d{i}", 2, 8_000_000) for i in range(1, 6)]   # 5 DEF
+        players += [_player("m1", 3, 6_000_000), _player("m2", 3, 6_000_000)]  # 2 MED
+        players += [_player(f"s{i}", 4, 12_000_000) for i in range(1, 4)]   # 3 DEL
+        best = optimize({"players": players}, prob_index={}, premium=True)
+        self.assertEqual(best["formation"], (5, 2, 3),
+                         f"a premium league must complete the XI as 5-2-3, got {best['formation']}")
+        self.assertFalse(best.get("incomplete"), "the 5-2-3 XI is complete — no holes")
+        self.assertEqual(len(payload_ids(best)), 11)
+        self.assertEqual(set(best["payload"]["midfield"]), {"m1", "m2"})
+
+    def test_non_premium_league_leaves_hole_for_two_midfielder_squad(self):
+        """The SAME squad in a NON-premium league (default) has no 2-midfielder shape
+        available, so it stays incomplete — a 3-midfield formation with one honest hole."""
+        players = [_player("gk1", 1, 5_000_000)]
+        players += [_player(f"d{i}", 2, 8_000_000) for i in range(1, 6)]
+        players += [_player("m1", 3, 6_000_000), _player("m2", 3, 6_000_000)]
+        players += [_player(f"s{i}", 4, 12_000_000) for i in range(1, 4)]
+        best = optimize({"players": players}, prob_index={})  # premium defaults to False
+        self.assertEqual(best["formation"][1], 3,
+                         f"non-premium must pick a 3-midfielder shape, got {best['formation']}")
+        self.assertTrue(best.get("incomplete"))
+        self.assertEqual(best.get("missing", {}).get("midfield"), 1)
+
+    def test_complete_squad_is_not_flagged_incomplete(self):
+        """A squad that CAN fill a formation must not be flagged incomplete (no false alarm)."""
+        players = [_player("gk1", 1, 5_000_000)]
+        players += [_player(f"d{i}", 2, 8_000_000) for i in range(1, 6)]
+        players += [_player(f"m{i}", 3, 8_000_000) for i in range(1, 6)]
+        players += [_player(f"s{i}", 4, 10_000_000) for i in range(1, 4)]
+        best = optimize({"players": players}, prob_index={})
+        self.assertFalse(best.get("incomplete"),
+                         "a fillable squad must not be flagged incomplete")
+        self.assertFalse(best.get("missing"),
+                         f"a fillable squad has no missing slots, got {best.get('missing')}")
+        self.assertEqual(len(payload_ids(best)), 11)
+
     def test_healthy_squad_unchanged(self):
         """A healthy squad still gets a full, all-available XI (no regression)."""
         players = [_player("gk1", 1, 5_000_000)]

@@ -8,7 +8,8 @@ in several places.
 import unicodedata
 
 # API positions (positionId -> abbreviation). Shared by the strategies.
-POS = {1: "POR", 2: "DEF", 3: "MED", 4: "DEL"}
+# 5 = "ENT" (Entrenador/coach), a premium-league slot — labelled so a coach never shows "?".
+POS = {1: "POR", 2: "DEF", 3: "MED", 4: "DEL", 5: "ENT"}
 
 
 def normalize(name: str) -> str:

@@ -17,6 +17,7 @@ from . import state
 from .matching import match_name, POS
 from .strategy import flip, needs as needs_mod, sell as sell_mod
 from .strategy import lineup as lineup_opt
+from .strategy import shield as shield_mod
 from .sources.lineups import probable_lineups
 from .sources.market_trends import trends_index
 from .sources import matchday
@@ -106,14 +107,29 @@ def _sync_tasks(gaps, targets, sells, lineup_changed):
         state.complete_by_key("lineup")
 
 
-def _current_xi_ids(client, team_id):
+def _current_lineup(client, team_id):
+    """Current lineup as (xi_ids, coach_id, captain_id).
+
+    `coach`/`captain` are premium-only fields on the GET formation (absent -> None). Exposed
+    so apply_lineup can detect a captain/coach change that leaves the XI unchanged (else we'd
+    never PUT the new captain). One API call; both act paths reuse it.
+    """
     lu = client.lineup(team_id)
     f = lu.get("formation", {})
     ids = set()
     for pos in ("goalkeeper", "defender", "midfield", "striker"):
         for p in f.get(pos, []) or []:
             ids.add(p.get("playerTeamId") or p["playerMaster"]["id"])
-    return ids
+    coach = None
+    for c in f.get("coach", []) or []:
+        coach = c.get("playerTeamId") or (c.get("playerMaster") or {}).get("id")
+    captain = f.get("captain") or None
+    return ids, coach, captain
+
+
+def _current_xi_ids(client, team_id):
+    """Just the current XI ids (back-compat wrapper over `_current_lineup`)."""
+    return _current_lineup(client, team_id)[0]
 
 
 def lineup_lock_reminder(kickoff, now=None):
@@ -140,6 +156,21 @@ def lineup_lock_reminder(kickoff, now=None):
     }
 
 
+def league_allows_premium_formations(client, lid) -> bool:
+    """True when this league is premium AND unlocks the extra formations (so the optimizer
+    may use the 2-midfielder shapes). Reads config.premiumFeatures.formations from leagues().
+    Any error / unknown league / lid None -> False (safe default: standard formations only)."""
+    if not lid:
+        return False
+    try:
+        for lg in client.leagues():
+            if str(lg.get("id")) == str(lid):
+                return bool((lg.get("config") or {}).get("premiumFeatures", {}).get("formations"))
+    except Exception:
+        return False
+    return False
+
+
 def review(client, days_to_matchday=None):
     lid, tid = client.default_ids()
     team = client.team(lid, tid)
@@ -160,7 +191,8 @@ def review(client, days_to_matchday=None):
     # 2) lineup — a squad that can't field a valid XI (e.g. no goalkeeper mid-rebuild)
     # must not crash the whole review: report it and carry on so gaps/needs still fire.
     try:
-        best = lineup_opt.optimize(team, prob_index)
+        premium = league_allows_premium_formations(client, lid)
+        best = lineup_opt.optimize(team, prob_index, premium=premium)
         best_ids = lineup_opt.payload_ids(best)
         lineup_changed = best_ids != _current_xi_ids(client, tid)
         lineup_section = {"formation": best["formation"], "changed": lineup_changed,
@@ -224,7 +256,7 @@ def review(client, days_to_matchday=None):
     except Exception:
         rivals_list = []
 
-    return {
+    result = {
         "events": events,
         "money": team["teamMoney"],
         "matchday": {"kickoff": kickoff, "days": days_to_matchday},
@@ -238,3 +270,19 @@ def review(client, days_to_matchday=None):
         "reminders": reminders,
         "tasks": state.pending_tasks(),
     }
+
+    # 5) defensive shield (blindaje): our most clause-vulnerable valuable player. Only when
+    # the squad can actually field an XI (best is not None) — if we can't even line up, the
+    # focus is elsewhere (fill the gap first). Reach reuses the `rivals` estimate above (the
+    # richest rival's cash) instead of a second API call. Fully guarded: any failure just
+    # OMITS the key, it must never break the daily review.
+    try:
+        if best is not None:
+            reach = max(
+                ((r.get("estimated_balance") or 0) for r in rivals_list if not r.get("is_me")),
+                default=0,
+            )
+            result["shield"] = shield_mod.shield_candidate(team, reach)
+    except Exception:
+        pass
+    return result

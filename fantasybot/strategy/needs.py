@@ -19,7 +19,7 @@ def squad_counts(team):
     counts = {"POR": 0, "DEF": 0, "MED": 0, "DEL": 0}
     for p in team["players"]:
         pos = POS.get(p["playerMaster"]["positionId"])
-        if pos:
+        if pos in counts:   # only the 4 outfield lines; a coach ("ENT", positionId 5) is skipped
             counts[pos] += 1
     return counts
 
