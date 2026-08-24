@@ -84,10 +84,6 @@ class ClauseTargetsFlagTheCheaperRoute(unittest.TestCase):
         self.assertEqual(targets[0]["saving_vs_clause"], 0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ReviewFeedbackRegressions(unittest.TestCase):
     """The three review findings on this PR, frozen as tests."""
 
@@ -114,3 +110,7 @@ class ReviewFeedbackRegressions(unittest.TestCase):
             self.assertEqual(len(state.load_tasks()), 1)   # misma tarea, no otra
         finally:
             state.TASKS_PATH = old
+
+
+if __name__ == "__main__":
+    unittest.main()
