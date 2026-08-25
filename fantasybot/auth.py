@@ -115,7 +115,10 @@ def _post_token(body: dict) -> dict:
                     "The login code was rejected. It's single-use and expires within a "
                     "couple of minutes — run `fantasybot login` again and paste the "
                     "redirect URL right away. Don't reuse an old code, and don't re-run "
-                    "step 1 in between (that regenerates the PKCE verifier).")
+                    "step 1 in between (that regenerates the PKCE verifier). If step 1 "
+                    "hung or took a while at Google's account-chooser screen before you "
+                    "got here, that's usually accumulated Google cookies, not this tool — "
+                    "retry in an Incognito/Private window.")
             raise AuthError("Your LaLiga session has expired or is no longer valid. "
                             "Run `fantasybot login` again to reconnect your account.")
         raise AuthError(f"{e.code}: {detail}")

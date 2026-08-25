@@ -22,6 +22,16 @@ The token lasts 24h and refreshes itself. If you ever need to do it by hand:
 `python -m fantasybot refresh`. The `refresh_token` lasts 90 days; when it expires,
 log in again.
 
+**Stuck on Google's account-chooser screen, or "the login code was rejected" every
+time?** This is almost always Google's account cookies, not fantasybot — a browser
+signed into several Google accounts over time can pile up enough cookie state that
+the account-chooser step hangs or errors out (Google's well-known "header too long"
+class of issue). By the time it finally resolves, the code has often expired.
+**Try step 1 again in an Incognito/Private window** (or a browser you're not signed
+into much) — this fixes it for most people immediately. If it still fails, an
+`AADB2Cxxxxx` code in the error detail (rerun with the actual redirect URL and check
+the exception) narrows it down further.
+
 ## Commands
 
 ```bash
