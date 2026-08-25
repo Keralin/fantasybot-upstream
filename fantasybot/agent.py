@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta
 
 from . import state
 from .matching import match_name, POS
+from .strategy import captain as captain_mod
 from .strategy import flip, needs as needs_mod, sell as sell_mod
 from .strategy import lineup as lineup_opt
 from .strategy import shield as shield_mod
@@ -41,6 +42,23 @@ def market_close(market):
 MIN_CLAUSE_PROB = 40  # don't recommend BUYING a player unlikely to start: a benchwarmer
                       # (e.g. a backup keeper at ~10%) scores 0, so a buyout on him is
                       # wasted money. Unknown prob (name unmatched) is kept, not penalised.
+
+
+def captain_fixture_difficulty(client) -> dict:
+    """{team_id: difficulty of the rival THAT team faces this gameweek} for the captain
+    picker (see strategy/captain.py). {} on ANY failure (network hiccup, unexpected API
+    shape) -- own try/except, separate from `_premium_extras`'s: a captain picked
+    without rival-awareness (today's behaviour) is fine, but a crash here must never
+    also cost the coach/captain/bench that `_premium_extras` would otherwise still
+    build successfully.
+    """
+    try:
+        week = client.current_week() or {}
+        fixtures = client.calendar(week.get("weekNumber")) or []
+        players = client.all_players() or []
+        return captain_mod.fixture_difficulty_by_team(players, fixtures)
+    except Exception:
+        return {}
 
 
 def clause_targets(market, team, prob_index):
@@ -228,7 +246,9 @@ def review(client, days_to_matchday=None):
     # must not crash the whole review: report it and carry on so gaps/needs still fire.
     try:
         premium = league_allows_premium_formations(client, lid)
-        best = lineup_opt.optimize(team, prob_index, premium=premium)
+        fixture_difficulty = captain_fixture_difficulty(client) if premium else None
+        best = lineup_opt.optimize(team, prob_index, premium=premium,
+                                   fixture_difficulty=fixture_difficulty)
         best_ids = lineup_opt.payload_ids(best)
         lineup_changed = best_ids != _current_xi_ids(client, tid)
         lineup_section = {"formation": best["formation"], "changed": lineup_changed,

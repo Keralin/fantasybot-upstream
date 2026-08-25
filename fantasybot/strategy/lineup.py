@@ -181,7 +181,7 @@ def _select_coach(players):
     return max(coaches, key=key)
 
 
-def optimize(team, prob_index=None, premium=False):
+def optimize(team, prob_index=None, premium=False, fixture_difficulty=None):
     """Computes the best XI + formation. Returns a dict with the proposal and the body.
 
     Every fielded slot is POSITION-VALID: each line is filled only from its own players,
@@ -267,7 +267,7 @@ def optimize(team, prob_index=None, premium=False):
     # never raises: any failure just falls back to the XI-only payload already built above
     # (a working XI beats a rejected PUT). See `_premium_extras`.
     if premium:
-        _premium_extras(team, best)
+        _premium_extras(team, best, fixture_difficulty)
     best["watch"] = watch
     return best
 
@@ -283,8 +283,12 @@ def optimize(team, prob_index=None, premium=False):
 #   bench:   {} (empty — every premium team we inspected had an empty bench; {} is valid and
 #            preserves current behaviour, so we do NOT guess a populated structure)
 # These three field names/formats are NOT 100% confirmed and are validated live before deploy.
-def _premium_extras(team, best):
-    """Add coach + captain + bench to `best["payload"]` (premium only). Never raises."""
+def _premium_extras(team, best, fixture_difficulty=None):
+    """Add coach + captain + bench to `best["payload"]` (premium only). Never raises.
+
+    `fixture_difficulty` (optional, see strategy.captain) nudges the captain pick away
+    from a tough fixture; omitted -> today's form-only pick, unchanged.
+    """
     try:
         players = team.get("players", [])
         # COACH: the best owned positionId-5 player, if any (a single playerTeamId).
@@ -304,7 +308,7 @@ def _premium_extras(team, best):
                 candidates.append({"playerTeamId": e["playerTeamId"],
                                    "playerMaster": raw["playerMaster"],
                                    "prob": e.get("prob"), "disponible": e.get("disponible")})
-        captain = pick_captain(candidates)
+        captain = pick_captain(candidates, fixture_difficulty)
         best["captain"] = str(captain) if captain is not None else None
         if captain is not None:
             best["payload"]["captain"] = str(captain)   # GET stores captain as a string id

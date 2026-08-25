@@ -143,8 +143,9 @@ def cmd_optimize(args):
     lid, tid = fc.default_ids()
     team = fc.team(lid, tid)
     premium = agent_mod.league_allows_premium_formations(fc, lid)
+    fixture_difficulty = agent_mod.captain_fixture_difficulty(fc) if premium else None
     try:
-        best = lineup_opt.optimize(team, premium=premium)
+        best = lineup_opt.optimize(team, premium=premium, fixture_difficulty=fixture_difficulty)
     except ValueError as e:
         # Incomplete squad (no goalkeeper / fewer than 11): can't field a valid XI.
         print(f"Can't build a lineup: {e}")
@@ -286,8 +287,9 @@ def cmd_agent(args):
     lid, tid = fc.default_ids()
     team = fc.team(lid, tid)
     premium = agent_mod.league_allows_premium_formations(fc, lid)
+    fixture_difficulty = agent_mod.captain_fixture_difficulty(fc) if premium else None
     try:
-        best = lineup_opt.optimize(team, premium=premium)
+        best = lineup_opt.optimize(team, premium=premium, fixture_difficulty=fixture_difficulty)
     except ValueError as e:
         # Incomplete squad (e.g. no goalkeeper): can't field a valid XI, so there's
         # nothing safe to auto-apply. Surface it and skip acting, don't crash the run.
