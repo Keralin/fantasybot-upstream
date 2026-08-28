@@ -67,6 +67,41 @@ def _insights():
             "active_time": tm.group(1) if tm else None}
 
 
+def trigger(mode):
+    """Fires one real agent cycle in a background thread, guarded by the same
+    `_RUN_LOCK`/`_RUNNING` atomic check the 'Launch agent' button uses -- so the
+    CLI's own auto-fire (`watch --run`/`--hermes`) can't race the button, or a
+    second `watch` process pointed at the same team, into launching two real
+    cycles (money and, in hermes mode, LLM tokens) at once. Returns False if one
+    was already running (nothing was fired); True if this call fired it.
+    """
+    global _RUNNING
+    with _RUN_LOCK:
+        if _RUNNING:
+            return False
+        _RUNNING = True
+
+    def go():
+        global _RUNNING
+        try:
+            if mode == "hermes":
+                if not shutil.which("hermes"):
+                    print("[watch] Hermes isn't installed. Install Hermes Agent "
+                          "(https://hermes-agent.nousresearch.com) or use "
+                          "'fantasybot watch --run' for the deterministic agent "
+                          "(no Hermes).", file=sys.stderr, flush=True)
+                    return
+                subprocess.run(["hermes", "-z", HERMES_PROMPT,
+                                "--skill", "fantasy-manager"])
+            else:
+                subprocess.run([sys.executable, "-m", "fantasybot", "agent", "--execute"])
+        finally:
+            _RUNNING = False   # single atomic write; the guard above prevents races
+
+    threading.Thread(target=go, daemon=True).start()
+    return True
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -100,33 +135,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _run(self):
         """Launches the real agent cycle (the 'Launch agent' button)."""
-        global _RUNNING
-        # Atomic check-and-set: two quick clicks (concurrent POSTs) must not both pass
-        # the guard and launch two cycles (in hermes mode that burns real LLM tokens).
-        with _RUN_LOCK:
-            if _RUNNING:
-                return self._send(409, "application/json", b'{"error":"already running"}')
-            _RUNNING = True
         mode = getattr(self.server, "run_mode", "agent")
-
-        def go():
-            global _RUNNING
-            try:
-                if mode == "hermes":
-                    if not shutil.which("hermes"):
-                        print("[watch] Hermes no está instalado. Instala Hermes Agent "
-                              "(https://hermes-agent.nousresearch.com) o usa "
-                              "'fantasybot watch --run' para el agente determinista "
-                              "(sin Hermes).", file=sys.stderr, flush=True)
-                        return
-                    subprocess.run(["hermes", "-z", HERMES_PROMPT,
-                                    "--skill", "fantasy-manager"])
-                else:
-                    subprocess.run([sys.executable, "-m", "fantasybot", "agent", "--execute"])
-            finally:
-                _RUNNING = False   # single atomic write; the guard above prevents races
-
-        threading.Thread(target=go, daemon=True).start()
+        if not trigger(mode):
+            return self._send(409, "application/json", b'{"error":"already running"}')
         self._send(202, "application/json", b'{"ok":true}')
 
     def _page(self):

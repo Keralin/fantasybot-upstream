@@ -394,7 +394,6 @@ def cmd_watch(args):
     - `--hermes`   triggers the Hermes brain with the skill (LLM), if installed.
     Without flags, it just monitors: you'll see the next cron cycle live.
     """
-    import subprocess
     import threading
     import webbrowser
     from . import monitor
@@ -407,11 +406,10 @@ def cmd_watch(args):
 
     def fire():
         time.sleep(1.2)  # let the UI connect the stream before starting
-        if args.hermes:
-            subprocess.run(["hermes", "-z", monitor.HERMES_PROMPT,
-                            "--skill", "fantasy-manager"])
-        elif args.run:
-            subprocess.run([sys.executable, "-m", "fantasybot", "agent", "--execute"])
+        # Goes through monitor.trigger() so this can't race a concurrent
+        # "Launch agent" button click (or a second watch process) into
+        # firing two real agent cycles at once.
+        monitor.trigger("hermes" if args.hermes else "agent")
 
     if args.run or args.hermes:
         threading.Thread(target=fire, daemon=True).start()
