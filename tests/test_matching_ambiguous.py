@@ -25,6 +25,17 @@ class TestAmbiguousMatch(unittest.TestCase):
         # "Etta Eyong" matches exactly one key -> still resolved
         self.assertEqual(match_name("Etta Eyong", "", index)["v"], 1)
 
+    def test_short_token_needs_a_whole_word(self):
+        index = index_by_name([{"nombre": "johnny cardoso", "v": 1}])
+        # "oso" is inside "cardOSO" but is not his name
+        self.assertIsNone(match_name("Oso", "", index))
+        self.assertEqual(match_name("Oso", "", index_by_name(
+            [{"nombre": "joaquin oso", "v": 2}]))["v"], 2)
+
+    def test_long_tokens_still_match_by_substring(self):
+        index = index_by_name([{"nombre": "orri steinn skarsson", "v": 1}])
+        self.assertEqual(match_name("Oskarsson", "", index)["v"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

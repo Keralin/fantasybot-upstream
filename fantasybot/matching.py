@@ -44,7 +44,18 @@ def match_name(nickname: str, full_name: str, index: dict):
         # one is a false positive (what SANITY_MAX_DIFF in flip.py papers over).
         # Ambiguous -> no confident match. The ID crosswalk is the real fix.
         hits = [value for key, value in index.items()
-                if all(t in key for t in tokens)]
+                if all(_token_matches(t, key.split()) for t in tokens)]
         if len(hits) == 1:
             return hits[0]
     return None
+
+
+def _token_matches(token, words):
+    """Whole-word match; substrings only between long tokens ("Oskarsson" vs
+    "skarsson"). Plain substring made "Oso" match "johnny cardoso"."""
+    for w in words:
+        if token == w:
+            return True
+        if len(token) >= 5 and len(w) >= 5 and (token in w or w in token):
+            return True
+    return False
