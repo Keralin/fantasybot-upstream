@@ -61,6 +61,17 @@ class TestAmbiguousMatch(unittest.TestCase):
                                {"nombre": "pathe ciss", "v": 2}])
         self.assertEqual(match_name("R. Terrats", "", index)["v"], 1)
         self.assertEqual(match_name("Pathé I. Ciss", "", index)["v"], 2)
+        # a two-word key still has to account for the initial
+        self.assertIsNone(match_name("J. David Jimenez", "",
+                                     index_by_name([{"nombre": "david jimenez"}])))
+
+    def test_several_initials_keep_their_order(self):
+        index = index_by_name([{"nombre": "carlos david smith", "v": 1},
+                               {"nombre": "smith david carlos", "v": 2}])
+        self.assertIsNone(match_name("D. C. Smith", "", index))
+        self.assertEqual(match_name("C. D. Smith", "", index)["v"], 1)
+        self.assertIsNone(match_name("Smith C. D.", "", index))
+        self.assertEqual(match_name("Smith D. C.", "", index)["v"], 2)
 
 
 if __name__ == "__main__":

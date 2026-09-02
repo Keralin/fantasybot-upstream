@@ -63,8 +63,8 @@ def _tokens_match(tokens, words):
     cardOSO and OSOrio, and "pedro" inside pedrosa turned unique hits into
     ambiguous ones. Leading initials ("C. Alvarez") must agree with a word
     before the first name match and trailing ones ("John C.") with a word after
-    the last; a middle initial ("Pathé I. Ciss") says nothing. When the key has
-    no word left over, initials are not checked ("R. Terrats" -> terrats)."""
+    the last; a middle initial ("Pathé I. Ciss") says nothing. A single-word
+    key has nothing to check initials against ("R. Terrats" -> terrats)."""
     names = [t for t in tokens if not _is_initial(t)]
     if not names:
         return False
@@ -79,9 +79,16 @@ def _tokens_match(tokens, words):
         if first is None:
             first = pos
         pos += 1
-    if len(words) == len(names):
+    if len(words) == 1:
         return True
-    lead = [t[0] for t in itertools.takewhile(_is_initial, tokens)]
-    trail = [t[0] for t in itertools.takewhile(_is_initial, reversed(tokens))]
-    return (all(any(w[0] == c for w in words[:first]) for c in lead)
-            and all(any(w[0] == c for w in words[pos:]) for c in trail))
+    lead = list(itertools.takewhile(_is_initial, tokens))
+    trail = list(itertools.takewhile(_is_initial, reversed(tokens)))[::-1]
+    return (_initials_in_order(lead, words[:first])
+            and _initials_in_order(trail, words[pos:]))
+
+
+def _initials_in_order(initials, words):
+    """Each initial takes a distinct word, in order ("D. C." needs a d-word and
+    then a c-word after it)."""
+    it = iter(words)
+    return all(any(w[0] == t[0] for w in it) for t in initials)
